@@ -35,11 +35,32 @@ mkdir -p "${STATE_DIR}"
 source "${HOME}/.nebius/path.bash.inc"
 
 SSH_PUBLIC_KEY="$(<"${SSH_PUBLIC_KEY_FILE}")"
+
+HOST_KEY_PRIV="${STATE_DIR}/${NAME}-host_ed25519_key"
+HOST_KEY_PUB="${HOST_KEY_PRIV}.pub"
+KNOWN_HOSTS_FILE="${STATE_DIR}/known_hosts.${NAME}"
+if [ ! -f "${HOST_KEY_PRIV}" ]; then
+  ssh-keygen -t ed25519 -N '' -C "${NAME}-host" -f "${HOST_KEY_PRIV}" >/dev/null
+fi
+HOST_KEY_PRIV_CONTENT="$(<"${HOST_KEY_PRIV}")"
+HOST_KEY_PUB_CONTENT="$(<"${HOST_KEY_PUB}")"
+printf '@cert-authority %s %s\n%s %s\n' \
+  "${NAME}" "${HOST_KEY_PUB_CONTENT}" \
+  "${NAME}" "${HOST_KEY_PUB_CONTENT}" > "${KNOWN_HOSTS_FILE}".tmp
+printf '%s %s\n' "${NAME}" "${HOST_KEY_PUB_CONTENT}" > "${KNOWN_HOSTS_FILE}"
+rm -f "${KNOWN_HOSTS_FILE}".tmp
+
+HOST_KEY_PRIV_INDENTED="$(sed 's/^/      /' "${HOST_KEY_PRIV}")"
+
 CLOUD_INIT="$(mktemp)"
 trap 'rm -f "${CLOUD_INIT}"' EXIT
 
 cat > "${CLOUD_INIT}" <<EOF
 #cloud-config
+ssh_keys:
+  ed25519_private: |
+${HOST_KEY_PRIV_INDENTED}
+  ed25519_public: ${HOST_KEY_PUB_CONTENT}
 users:
   - default
   - name: ${SSH_USER}
@@ -112,7 +133,7 @@ write_files:
 
       grep -q "HF_XET_HIGH_PERFORMANCE" "/home/\${user}/.bashrc" || cat >> "/home/\${user}/.bashrc" <<'BASHRC'
 
-      if [ -f "$HOME/.env" ]; then set -a; source "$HOME/.env"; set +a; fi
+      if [ -f "\$HOME/.env" ]; then set -a; source "\$HOME/.env"; set +a; fi
       BASHRC
       chown "\${user}:\${user}" "/home/\${user}/.bashrc"
 runcmd:
@@ -191,7 +212,13 @@ EOF
 echo "Waiting for SSH at ${SSH_USER}@${PUBLIC_IP}..."
 SSH_READY=0
 for _ in $(seq 1 120); do
-  if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${SSH_USER}@${PUBLIC_IP}" true; then
+  if ssh -o BatchMode=yes -o ConnectTimeout=5 \
+       -i "${SSH_PUBLIC_KEY_FILE%.pub}" \
+       -o IdentitiesOnly=yes \
+       -o "HostKeyAlias=${NAME}" \
+       -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}" \
+       -o StrictHostKeyChecking=yes \
+       "${SSH_USER}@${PUBLIC_IP}" true; then
     SSH_READY=1
     break
   fi

@@ -11,4 +11,7 @@ source "${STATE_FILE}"
 nebius compute instance delete "${INSTANCE_ID}"
 nebius compute disk delete "${HOME_DISK_ID}"
 nebius compute filesystem delete "${SCRATCH_FS_ID}"
-rm -f "${STATE_FILE}"
+rm -f "${STATE_FILE}" \
+      "${REPO_DIR}/.state/${NAME}-host_ed25519_key" \
+      "${REPO_DIR}/.state/${NAME}-host_ed25519_key.pub" \
+      "${REPO_DIR}/.state/known_hosts.${NAME}"

@@ -1,34 +1,29 @@
 # Nebius Dev Box
 
-This repo provisions a cheap Nebius CPU dev box for code/orchestration:
+Provisions a single cheap Nebius CPU dev VM for remote coding/orchestration work.
 
-- `2vcpu-8gb` CPU VM by default.
-- 300 GiB persistent `network_ssd` block disk mounted as `/home`.
-- Nebius shared filesystem mounted as `/ceph/scratch/jbauer`.
-- Codex, Claude Code, Node, uv, git, tmux, rsync, and the Nebius CLI installed by cloud-init.
-- Optional local Codex/Claude credential sync after the VM is reachable.
-- Whitelisted home-folder sync from this machine via `home-whitelist.txt`; by default this syncs `.gitconfig` and `loracles/`.
+- `2vcpu-8gb` CPU VM by default (~$36/month).
+- 300 GiB persistent `network_ssd` block disk mounted as `/home`, so your home directory survives VM rebuilds (~$21/month).
+- Nebius shared filesystem mounted as `/ceph/scratch/$USER` for caches and large data (`SCRATCH_FS_SIZE_GIB * $0.08/month`; default 1024 GiB ≈ $82/month).
+- First boot installs uv, nvm/Node, Codex, Claude Code, and the Nebius CLI via cloud-init.
+- Optional one-shot sync of local Codex/Claude credentials and a whitelisted set of dotfiles after the VM is reachable.
 
-The scripts are intended to be public-safe. Generated state and copied credentials are ignored by git.
+Compute stops billing when the VM is stopped. Disks and the shared filesystem bill while they exist.
 
-## Cost Shape
+## Setup
 
-Default always-on monthly cost is roughly:
+Edit [config.env](config.env). It hardcodes the original author's project ID, subnet, username, and SSH key path — change at least these:
 
-- CPU VM `2vcpu-8gb`: about `$36/month`.
-- Home disk 300 GiB `network_ssd`: about `$21/month`.
-- Shared filesystem: `SCRATCH_FS_SIZE_GIB * $0.08/month`.
+- `PROJECT_ID`, `SUBNET_ID` — your Nebius project/subnet.
+- `SSH_USER` — the user to create on the VM.
+- `SSH_PUBLIC_KEY_FILE` — public key authorized for that user.
+- `NAME` — used for resource names and as a `HostKeyAlias`; change it if you want to run more than one box.
 
-The default shared filesystem size is 1024 GiB, about `$82/month`. Set `SCRATCH_FS_SIZE_GIB=4096` if you want the shared filesystem to start at the 4 TiB performance scaling unit.
-
-Compute stops billing when the VM is stopped. Disks and shared filesystems bill while they exist.
+Make sure the Nebius CLI is installed and authenticated (`nebius compute instance list` should work).
 
 ## Launch
 
-Edit [config.env](config.env) first. It contains the project, VM size, disk sizes, and auth-sync default.
-
 ```bash
-cd ~/nebius
 scripts/launch-dev-box.sh
 ```
 
@@ -37,34 +32,46 @@ Useful overrides:
 ```bash
 PRESET=4vcpu-16gb scripts/launch-dev-box.sh
 SCRATCH_FS_SIZE_GIB=4096 scripts/launch-dev-box.sh
-SYNC_AUTH=0 scripts/launch-dev-box.sh
+SYNC_AUTH=0 scripts/launch-dev-box.sh   # skip copying local Codex/Claude creds to the VM
 ```
 
-After launch:
+By default the launcher copies local Codex and Claude credentials to the VM. That is convenient but places live auth material on a cloud host — set `SYNC_AUTH=0` to skip it.
+
+## Lifecycle
 
 ```bash
-scripts/ssh-dev-box.sh
-scripts/sync-home-whitelist.sh
-scripts/sync-agent-auth.sh
-scripts/stop-dev-box.sh
-scripts/start-dev-box.sh
+scripts/ssh-dev-box.sh                  # ssh in (resolves current public IP via Nebius CLI)
+scripts/sync-home-whitelist.sh          # rsync paths listed in home-whitelist.txt to the VM
+scripts/sync-agent-auth.sh              # re-sync Codex/Claude credentials
+scripts/stop-dev-box.sh                 # stop billing for compute (storage still bills)
+scripts/start-dev-box.sh                # restart; public IP usually changes
+CONFIRM_DELETE=$NAME scripts/delete-dev-box.sh   # destroy VM + disk + shared FS
 ```
 
-By default, launch copies local Codex and Claude credentials to the VM. That is convenient, but it also places live auth material on the Nebius host. Set `SYNC_AUTH=0` to skip that step.
+## SSH and host keys
 
-To delete the VM plus the two persistent storage resources created by the launcher:
+Public IPs rotate on every restart. To keep ssh sane across that:
 
-```bash
-CONFIRM_DELETE=nebius-dev scripts/delete-dev-box.sh
+- The launcher pre-generates an ed25519 host key under `.state/${NAME}-host_ed25519_key` and ships it to the VM via cloud-init `ssh_keys:`. The matching public key is written to `.state/known_hosts.${NAME}` keyed by the alias `${NAME}`.
+- All scripts ssh in with `HostKeyAlias=${NAME}` and `UserKnownHostsFile=.state/known_hosts.${NAME}` under `StrictHostKeyChecking=yes`. IP changes don't trigger host-key warnings, and a wrong server is rejected outright.
+- `delete-dev-box.sh` removes the host key and known_hosts file so the next launch starts clean.
+
+To ssh from your own `~/.ssh/config` instead of the bundled script, add an entry like:
+
+```sshconfig
+Host mybox
+  HostName placeholder
+  User <your SSH_USER>
+  IdentityFile ~/.ssh/<your key>
+  IdentitiesOnly yes
+  HostKeyAlias <your NAME>
+  UserKnownHostsFile <absolute path to repo>/.state/known_hosts.<your NAME>
+  StrictHostKeyChecking yes
+  ProxyCommand sh -c 'exec nc $(<absolute path to repo>/scripts/lookup-ip.sh) %p'
 ```
 
-## GitHub
+(Or just use `scripts/ssh-dev-box.sh`.)
 
-This local directory is initialized as a git repo, but the scripts do not push automatically.
+## State and secrets
 
-To create the public GitHub repo and push after reviewing the files:
-
-```bash
-gh repo create japhba/nebius --public --source ~/nebius --remote origin
-git -C ~/nebius push -u origin main
-```
+`.state/` is gitignored. It contains `${NAME}.env` (instance/disk/FS IDs and last-known IP), the host private key, and the matching `known_hosts` file. Back it up if you don't want to regenerate the host key on rebuild; otherwise treat it as ephemeral.
