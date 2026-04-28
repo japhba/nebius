@@ -11,7 +11,7 @@ nebius compute instance start "${INSTANCE_ID}" >/dev/null
 PUBLIC_IP=""
 for _ in $(seq 1 120); do
   INSTANCE_GET="$(nebius compute instance get "${INSTANCE_ID}" --format json)"
-  PUBLIC_IP="$(jq -r '.. | objects | .public_ip_address? | objects | .address? // empty' <<< "${INSTANCE_GET}" | head -n 1)"
+  PUBLIC_IP="$(jq -r '.. | objects | .public_ip_address? | objects | .address? // empty | split("/")[0]' <<< "${INSTANCE_GET}" | head -n 1)"
   [ -n "${PUBLIC_IP}" ] && break
   sleep 5
 done

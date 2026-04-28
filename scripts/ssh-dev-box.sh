@@ -8,7 +8,7 @@ source "${STATE_FILE}"
 
 PUBLIC_IP="$(
   nebius compute instance get "${INSTANCE_ID}" --format json \
-    | jq -r '.. | objects | .public_ip_address? | objects | .address? // empty' \
+    | jq -r '.. | objects | .public_ip_address? | objects | .address? // empty | split("/")[0]' \
     | head -n 1
 )"
 : "${PUBLIC_IP:?Nebius did not report a public IP for ${INSTANCE_ID}}"

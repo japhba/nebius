@@ -3,7 +3,7 @@
 #
 # Keep project/code directories and high-churn caches out of this file.
 # These paths are user-level config only. Some of them contain credentials
-# (.env, .config/gh), so only sync to hosts you trust.
+# (.env), so only sync to hosts you trust.
 # Agent credentials are handled separately by scripts/sync-agent-auth.sh.
 
 .bash_profile

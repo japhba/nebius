@@ -3,12 +3,12 @@
 Provisions a single cheap Nebius CPU dev VM for remote coding/orchestration work.
 
 - `2vcpu-8gb` CPU VM by default (~$36/month).
-- 300 GiB persistent `network_ssd` block disk mounted as `/home`, so your home directory survives VM rebuilds (~$21/month).
-- Nebius shared filesystem mounted as `/ceph/scratch/$USER` for caches and large data (`SCRATCH_FS_SIZE_GIB * $0.08/month`; default 1024 GiB ≈ $82/month).
+- 300 GiB shared `network_ssd` filesystem mounted as `/nfs/nhome/live`; the VM user's home is `/nfs/nhome/live/$USER`. GPU workers can mount the same filesystem at the same path and see code immediately (~$24/month).
+- Separate Nebius shared filesystem mounted as `/ceph/scratch` for caches and large data (`SCRATCH_FS_SIZE_GIB * $0.08/month`; default 1024 GiB ≈ $82/month).
 - First boot installs uv, nvm/Node, Codex, Claude Code, Miniconda, `tmux`, `btop`, `nvitop`, and the Nebius CLI via cloud-init.
-- Optional one-shot sync of local Codex/Claude credentials and a whitelisted set of home config files after the VM is reachable. Local `~/.env` is sourced alongside VM-specific cache defaults in `~/.env.nebius`.
+- Optional one-shot sync of local Codex/Claude credentials, Nebius CLI credentials, and a whitelisted set of home config files after cloud-init has finished. Local `~/.env` is sourced alongside VM-specific cache defaults in `~/.env.nebius`.
 
-Compute stops billing when the VM is stopped. Disks and the shared filesystem bill while they exist.
+Compute stops billing when the VM is stopped. Shared filesystems bill while they exist.
 
 ## Setup
 
@@ -32,21 +32,34 @@ Useful overrides:
 ```bash
 PRESET=4vcpu-16gb scripts/launch-dev-box.sh
 SCRATCH_FS_SIZE_GIB=4096 scripts/launch-dev-box.sh
+HOME_FS_ID=computefilesystem-... scripts/launch-dev-box.sh   # reuse an existing shared home filesystem
+SCRATCH_FS_ID=computefilesystem-... scripts/launch-dev-box.sh   # reuse an existing shared scratch filesystem
 SYNC_AUTH=0 scripts/launch-dev-box.sh   # skip copying local Codex/Claude creds to the VM
+SYNC_NEBIUS_AUTH=0 scripts/launch-dev-box.sh   # skip copying local Nebius CLI creds to the VM
 ```
 
-By default the launcher copies local Codex and Claude credentials to the VM. That is convenient but places live auth material on a cloud host — set `SYNC_AUTH=0` to skip it.
+By default the launcher copies local Codex, Claude, and Nebius CLI credentials to the VM. That is convenient for using the CPU box as a GPU-rental orchestrator, but places live auth material on a cloud host. Set `SYNC_AUTH=0` and/or `SYNC_NEBIUS_AUTH=0` to skip those copies.
+
+The launcher writes `.state/${NAME}.env` as soon as each resource is created, so `CONFIRM_DELETE=$NAME scripts/delete-dev-box.sh` can clean up even after a partial launch failure.
+
+## GPU workers
+
+Attach the same `HOME_FS_ID` to GPU VMs with mount tag `nebius-home` and the same `SCRATCH_FS_ID` with mount tag `ceph-scratch`. Mount `nebius-home` at `/nfs/nhome/live` and set the user's home to `/nfs/nhome/live/$USER`; mount `ceph-scratch` at `/ceph/scratch`. With that layout, code edited on the CPU dev box appears on GPU workers immediately, while caches and model files stay on the larger scratch filesystem.
 
 ## Lifecycle
 
 ```bash
 scripts/ssh-dev-box.sh                  # ssh in (resolves current public IP via Nebius CLI)
+scripts/status-dev-box.sh               # show Nebius resources plus cloud-init/mount status
 scripts/sync-home-whitelist.sh          # rsync paths listed in home-whitelist.txt to the VM
-scripts/sync-agent-auth.sh              # re-sync Codex/Claude credentials
-scripts/stop-dev-box.sh                 # stop billing for compute (storage still bills)
+scripts/sync-agent-auth.sh              # re-sync Codex/Claude credentials and templates/CLAUDE.md
+scripts/sync-nebius-auth.sh             # re-sync Nebius CLI credentials
+scripts/stop-dev-box.sh                 # stop billing for compute (filesystems still bill)
 scripts/start-dev-box.sh                # restart; public IP usually changes
-CONFIRM_DELETE=$NAME scripts/delete-dev-box.sh   # destroy VM + disk + shared FS
+CONFIRM_DELETE=$NAME scripts/delete-dev-box.sh   # destroy VM + any filesystems this launcher created
 ```
+
+The sync scripts wait for `cloud-init status --wait` and verify `/nfs/nhome/live`, `/ceph/scratch`, `.cargo/env`, and `.env.nebius` before copying files. This avoids rsync protocol failures from half-initialized shell startup files.
 
 ## SSH and host keys
 
@@ -74,4 +87,4 @@ Host mybox
 
 ## State and secrets
 
-`.state/` is gitignored. It contains `${NAME}.env` (instance/disk/FS IDs and last-known IP), the host private key, and the matching `known_hosts` file. Back it up if you don't want to regenerate the host key on rebuild; otherwise treat it as ephemeral.
+`.state/` is gitignored. It contains `${NAME}.env` (instance/filesystem IDs and last-known IP), the host private key, and the matching `known_hosts` file. Back it up if you don't want to regenerate the host key on rebuild; otherwise treat it as ephemeral.

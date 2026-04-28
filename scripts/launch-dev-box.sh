@@ -16,8 +16,10 @@ PLATFORM="${PLATFORM:-cpu-e2}"
 PRESET="${PRESET:-2vcpu-8gb}"
 BOOT_DISK_SIZE_GIB="${BOOT_DISK_SIZE_GIB:-30}"
 BOOT_DISK_TYPE="${BOOT_DISK_TYPE:-network_ssd}"
-HOME_DISK_SIZE_GIB="${HOME_DISK_SIZE_GIB:-300}"
-HOME_DISK_TYPE="${HOME_DISK_TYPE:-network_ssd}"
+HOME_FS_ID="${HOME_FS_ID:-}"
+HOME_FS_SIZE_GIB="${HOME_FS_SIZE_GIB:-300}"
+HOME_FS_TYPE="${HOME_FS_TYPE:-network_ssd}"
+SCRATCH_FS_ID="${SCRATCH_FS_ID:-}"
 SCRATCH_FS_SIZE_GIB="${SCRATCH_FS_SIZE_GIB:-1024}"
 SCRATCH_FS_TYPE="${SCRATCH_FS_TYPE:-network_ssd}"
 
@@ -27,10 +29,35 @@ NODE_VERSION="${NODE_VERSION:-22}"
 CODEX_NPM_PACKAGE="${CODEX_NPM_PACKAGE:-@openai/codex}"
 CLAUDE_NPM_PACKAGE="${CLAUDE_NPM_PACKAGE:-@anthropic-ai/claude-code}"
 SYNC_AUTH="${SYNC_AUTH:-1}"
+SYNC_NEBIUS_AUTH="${SYNC_NEBIUS_AUTH:-1}"
 
 STATE_DIR="${REPO_DIR}/.state"
 STATE_FILE="${STATE_DIR}/${NAME}.env"
 mkdir -p "${STATE_DIR}"
+
+if [ -e "${STATE_FILE}" ]; then
+  echo "State file already exists: ${STATE_FILE}" >&2
+  echo "Use scripts/ssh-dev-box.sh, scripts/start-dev-box.sh, or CONFIRM_DELETE=${NAME} scripts/delete-dev-box.sh; set NAME=... for a second box." >&2
+  exit 1
+fi
+
+INSTANCE_ID=""
+HOME_FS_CREATED=0
+SCRATCH_FS_CREATED=0
+PUBLIC_IP=""
+write_state() {
+  cat > "${STATE_FILE}" <<EOF
+PROJECT_ID=${PROJECT_ID}
+NAME=${NAME}
+INSTANCE_ID=${INSTANCE_ID}
+HOME_FS_ID=${HOME_FS_ID}
+HOME_FS_CREATED=${HOME_FS_CREATED}
+SCRATCH_FS_ID=${SCRATCH_FS_ID}
+SCRATCH_FS_CREATED=${SCRATCH_FS_CREATED}
+SSH_USER=${SSH_USER}
+PUBLIC_IP=${PUBLIC_IP}
+EOF
+}
 
 source "${HOME}/.nebius/path.bash.inc"
 
@@ -94,10 +121,12 @@ write_files:
       set -euo pipefail
 
       user="${SSH_USER}"
-      bashrc="/home/${SSH_USER}/.bashrc"
+      home_dir="\$(getent passwd "\${user}" | cut -d: -f6)"
+      bashrc="\${home_dir}/.bashrc"
       marker_begin="# >>> nebius-dev shell setup >>>"
       marker_end="# <<< nebius-dev shell setup <<<"
 
+      mkdir -p "\${home_dir}"
       touch "\${bashrc}"
       tmp="\$(mktemp)"
       sed "/^\${marker_begin}\$/,/^\${marker_end}\$/d" "\${bashrc}" > "\${tmp}"
@@ -125,75 +154,88 @@ write_files:
       set -euo pipefail
 
       user="${SSH_USER}"
-      home_dev="/dev/disk/by-id/virtio-home"
+      home_tag="nebius-home"
       scratch_tag="ceph-scratch"
-      scratch_path="/ceph/scratch/${SSH_USER}"
+      nhome_root="/nfs/nhome/live"
+      remote_home="\${nhome_root}/${SSH_USER}"
+      scratch_root="/ceph/scratch"
+      scratch_path="\${scratch_root}/${SSH_USER}"
 
       udevadm settle
-      for _ in \$(seq 1 60); do [ -e "\${home_dev}" ] && break; sleep 2; done
-      [ -e "\${home_dev}" ]
+      mkdir -p "\${nhome_root}" "\${scratch_root}"
+      mountpoint -q "\${nhome_root}" || mount -t virtiofs "\${home_tag}" "\${nhome_root}"
+      grep -q "^\${home_tag} " /etc/fstab || printf "%s %s virtiofs defaults,nofail 0 0\n" "\${home_tag}" "\${nhome_root}" >> /etc/fstab
+      mkdir -p "\${remote_home}"
+      if [ -d "/home/\${user}" ] && [ ! -L "/home/\${user}" ]; then
+        rsync -a "/home/\${user}/" "\${remote_home}/"
+        rm -rf "/home/\${user}"
+      fi
+      usermod -d "\${remote_home}" "\${user}"
+      chown -R "\${user}:\${user}" "\${remote_home}"
 
-      blkid "\${home_dev}" >/dev/null || mkfs.ext4 -F "\${home_dev}"
-      mkdir -p /mnt/home-disk
-      mountpoint -q /mnt/home-disk || mount "\${home_dev}" /mnt/home-disk
-      mkdir -p "/mnt/home-disk/\${user}"
-      rsync -a "/home/\${user}/" "/mnt/home-disk/\${user}/"
-      chown -R "\${user}:\${user}" "/mnt/home-disk/\${user}"
-      home_uuid="\$(blkid -s UUID -o value "\${home_dev}")"
-      grep -q " /home " /etc/fstab || printf "UUID=%s /home ext4 defaults,nofail 0 2\n" "\${home_uuid}" >> /etc/fstab
-      mountpoint -q /home || mount --move /mnt/home-disk /home
+      mountpoint -q "\${scratch_root}" || mount -t virtiofs "\${scratch_tag}" "\${scratch_root}"
+      grep -q "^\${scratch_tag} " /etc/fstab || printf "%s %s virtiofs defaults,nofail 0 0\n" "\${scratch_tag}" "\${scratch_root}" >> /etc/fstab
+      mkdir -p "\${scratch_path}/"{cache,hf,logs,tmp,venvs}
+      chown -R "\${user}:\${user}" "\${scratch_path}"
 
-      mkdir -p "\${scratch_path}"
-      mountpoint -q "\${scratch_path}" || mount -t virtiofs "\${scratch_tag}" "\${scratch_path}"
-      grep -q "^\${scratch_tag} " /etc/fstab || printf "%s %s virtiofs defaults,nofail 0 0\n" "\${scratch_tag}" "\${scratch_path}" >> /etc/fstab
-      mkdir -p "\${scratch_path}/"{cache,hf,logs,tmp}
-      chown -R "\${user}:\${user}" /ceph/scratch
+      sudo -Hu "\${user}" bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
+      sudo -Hu "\${user}" bash -lc 'mkdir -p ~/.cargo && touch ~/.cargo/env'
+      sudo -Hu "\${user}" bash -lc 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash'
+      sudo -Hu "\${user}" bash -lc 'source ~/.nvm/nvm.sh && nvm install ${NODE_VERSION} && nvm alias default ${NODE_VERSION} && npm install -g ${CODEX_NPM_PACKAGE} ${CLAUDE_NPM_PACKAGE} && mkdir -p ~/.local/bin && for tool in node npm npx codex claude; do ln -sf "\$(command -v "\$tool")" ~/.local/bin/"\$tool"; done'
+      sudo -Hu "\${user}" bash -lc 'curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh && bash /tmp/miniconda.sh -b -p "\$HOME/miniconda3" && "\$HOME/miniconda3/bin/conda" tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && "\$HOME/miniconda3/bin/conda" tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && "\$HOME/miniconda3/bin/conda" config --set auto_activate_base false && "\$HOME/miniconda3/bin/conda" config --add channels conda-forge && "\$HOME/miniconda3/bin/conda" config --set channel_priority strict && "\$HOME/miniconda3/bin/conda" install -y -n base -c conda-forge btop nvitop && "\$HOME/miniconda3/bin/conda" clean -afy && mkdir -p ~/.local/bin && for tool in conda btop nvitop; do ln -sf "\$HOME/miniconda3/bin/\$tool" ~/.local/bin/"\$tool"; done'
+      sudo -Hu "\${user}" bash -lc 'curl -fsSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash && mkdir -p ~/.local/bin && ln -sf ~/.nebius/bin/nebius ~/.local/bin/nebius'
 
-      sudo -u "\${user}" bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-      sudo -u "\${user}" bash -lc 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash'
-      sudo -u "\${user}" bash -lc 'source ~/.nvm/nvm.sh && nvm install ${NODE_VERSION} && nvm alias default ${NODE_VERSION} && npm install -g ${CODEX_NPM_PACKAGE} ${CLAUDE_NPM_PACKAGE} && mkdir -p ~/.local/bin && for tool in node npm npx codex claude; do ln -sf "\$(command -v "\$tool")" ~/.local/bin/"\$tool"; done'
-      sudo -u "\${user}" bash -lc 'curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh && bash /tmp/miniconda.sh -b -p "\$HOME/miniconda3" && "\$HOME/miniconda3/bin/conda" config --set auto_activate_base false && "\$HOME/miniconda3/bin/conda" config --add channels conda-forge && "\$HOME/miniconda3/bin/conda" config --set channel_priority strict && "\$HOME/miniconda3/bin/conda" install -y -n base -c conda-forge btop nvitop && "\$HOME/miniconda3/bin/conda" clean -afy && mkdir -p ~/.local/bin && for tool in conda btop nvitop; do ln -sf "\$HOME/miniconda3/bin/\$tool" ~/.local/bin/"\$tool"; done'
-      sudo -u "\${user}" bash -lc 'curl -fsSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash && mkdir -p ~/.local/bin && ln -sf ~/.nebius/bin/nebius ~/.local/bin/nebius'
-
-      cat > "/home/\${user}/.env.nebius" <<ENVEOF
+      cat > "\${remote_home}/.env.nebius" <<ENVEOF
       CACHE_DIR=/ceph/scratch/${SSH_USER}/cache
       FAST_CACHE_DIR=/ceph/scratch/${SSH_USER}/tmp
       HF_HOME=/ceph/scratch/${SSH_USER}/hf
       HF_XET_HIGH_PERFORMANCE=1
+      VENV_LOCAL=/ceph/scratch/${SSH_USER}/venvs
       ENVEOF
-      chown "\${user}:\${user}" "/home/\${user}/.env.nebius"
-      chmod 600 "/home/\${user}/.env.nebius"
+      chown "\${user}:\${user}" "\${remote_home}/.env.nebius"
+      chmod 600 "\${remote_home}/.env.nebius"
 
       /usr/local/sbin/nebius-dev-refresh-shell.sh
 runcmd:
   - [bash, /usr/local/sbin/nebius-dev-firstboot.sh]
 EOF
 
-echo "Creating ${HOME_DISK_SIZE_GIB} GiB home disk..."
-HOME_DISK_ID="$(
-  nebius compute disk create \
-    --parent-id "${PROJECT_ID}" \
-    --name "${NAME}-home" \
-    --size-gibibytes "${HOME_DISK_SIZE_GIB}" \
-    --type "${HOME_DISK_TYPE}" \
-    --format json | jq -r '.metadata.id'
-)"
-echo "Home disk: ${HOME_DISK_ID}"
+if [ -z "${HOME_FS_ID}" ]; then
+  echo "Creating ${HOME_FS_SIZE_GIB} GiB shared home filesystem..."
+  HOME_FS_ID="$(
+    nebius compute filesystem create \
+      --parent-id "${PROJECT_ID}" \
+      --name "${NAME}-home" \
+      --size-gibibytes "${HOME_FS_SIZE_GIB}" \
+      --type "${HOME_FS_TYPE}" \
+      --format json | jq -r '.metadata.id'
+  )"
+  HOME_FS_CREATED=1
+  echo "Home filesystem: ${HOME_FS_ID}"
+else
+  echo "Using existing shared home filesystem: ${HOME_FS_ID}"
+fi
+write_state
 
-echo "Creating ${SCRATCH_FS_SIZE_GIB} GiB shared filesystem..."
-SCRATCH_FS_ID="$(
-  nebius compute filesystem create \
-    --parent-id "${PROJECT_ID}" \
-    --name "${NAME}-scratch" \
-    --size-gibibytes "${SCRATCH_FS_SIZE_GIB}" \
-    --type "${SCRATCH_FS_TYPE}" \
-    --format json | jq -r '.metadata.id'
-)"
-echo "Shared filesystem: ${SCRATCH_FS_ID}"
+if [ -z "${SCRATCH_FS_ID}" ]; then
+  echo "Creating ${SCRATCH_FS_SIZE_GIB} GiB shared scratch filesystem..."
+  SCRATCH_FS_ID="$(
+    nebius compute filesystem create \
+      --parent-id "${PROJECT_ID}" \
+      --name "${NAME}-scratch" \
+      --size-gibibytes "${SCRATCH_FS_SIZE_GIB}" \
+      --type "${SCRATCH_FS_TYPE}" \
+      --format json | jq -r '.metadata.id'
+  )"
+  SCRATCH_FS_CREATED=1
+  echo "Scratch filesystem: ${SCRATCH_FS_ID}"
+else
+  echo "Using existing shared scratch filesystem: ${SCRATCH_FS_ID}"
+fi
+write_state
 
-NETWORK_INTERFACES="$(jq -nc --arg subnet "${SUBNET_ID}" '[{subnet_id:$subnet,public_ip_address:{}}]')"
-SECONDARY_DISKS="$(jq -nc --arg id "${HOME_DISK_ID}" '[{attach_mode:"read_write",device_id:"home",existing_disk:{id:$id}}]')"
-FILESYSTEMS="$(jq -nc --arg id "${SCRATCH_FS_ID}" '[{attach_mode:"read_write",mount_tag:"ceph-scratch",existing_filesystem:{id:$id}}]')"
+NETWORK_INTERFACES="$(jq -nc --arg subnet "${SUBNET_ID}" '[{name:"eth0",subnet_id:$subnet,ip_address:{},public_ip_address:{}}]')"
+FILESYSTEMS="$(jq -nc --arg home_id "${HOME_FS_ID}" --arg scratch_id "${SCRATCH_FS_ID}" '[{attach_mode:"read_write",mount_tag:"nebius-home",existing_filesystem:{id:$home_id}},{attach_mode:"read_write",mount_tag:"ceph-scratch",existing_filesystem:{id:$scratch_id}}]')"
 
 echo "Creating CPU VM ${NAME}..."
 INSTANCE_JSON="$(
@@ -210,33 +252,23 @@ INSTANCE_JSON="$(
     --boot-disk-managed-disk-source-image-family-image-family "${IMAGE_FAMILY}" \
     --boot-disk-managed-disk-source-image-family-parent-id "${IMAGE_PARENT_ID}" \
     --network-interfaces "${NETWORK_INTERFACES}" \
-    --secondary-disks "${SECONDARY_DISKS}" \
     --filesystems "${FILESYSTEMS}" \
     --cloud-init-user-data "$(<"${CLOUD_INIT}")" \
     --format json
 )"
 INSTANCE_ID="$(jq -r '.metadata.id' <<< "${INSTANCE_JSON}")"
 echo "Instance: ${INSTANCE_ID}"
+write_state
 
 echo "Waiting for public IP..."
-PUBLIC_IP=""
 for _ in $(seq 1 120); do
   INSTANCE_GET="$(nebius compute instance get "${INSTANCE_ID}" --format json)"
-  PUBLIC_IP="$(jq -r '.. | objects | .public_ip_address? | objects | .address? // empty' <<< "${INSTANCE_GET}" | head -n 1)"
+  PUBLIC_IP="$(jq -r '.. | objects | .public_ip_address? | objects | .address? // empty | split("/")[0]' <<< "${INSTANCE_GET}" | head -n 1)"
   [ -n "${PUBLIC_IP}" ] && break
   sleep 5
 done
 : "${PUBLIC_IP:?Nebius did not report a public IP for ${INSTANCE_ID}}"
-
-cat > "${STATE_FILE}" <<EOF
-PROJECT_ID=${PROJECT_ID}
-NAME=${NAME}
-INSTANCE_ID=${INSTANCE_ID}
-HOME_DISK_ID=${HOME_DISK_ID}
-SCRATCH_FS_ID=${SCRATCH_FS_ID}
-SSH_USER=${SSH_USER}
-PUBLIC_IP=${PUBLIC_IP}
-EOF
+write_state
 
 echo "Waiting for SSH at ${SSH_USER}@${PUBLIC_IP}..."
 SSH_READY=0
@@ -255,10 +287,15 @@ for _ in $(seq 1 120); do
 done
 [ "${SSH_READY}" = "1" ]
 
+"${REPO_DIR}/scripts/wait-dev-box-ready.sh"
 "${REPO_DIR}/scripts/sync-home-whitelist.sh"
 
 if [ "${SYNC_AUTH}" = "1" ]; then
   "${REPO_DIR}/scripts/sync-agent-auth.sh"
+fi
+
+if [ "${SYNC_NEBIUS_AUTH}" = "1" ]; then
+  "${REPO_DIR}/scripts/sync-nebius-auth.sh"
 fi
 
 echo "Ready: ssh ${SSH_USER}@${PUBLIC_IP}"
