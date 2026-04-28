@@ -15,3 +15,4 @@ trap 'rm -f "${FILES_FROM}"' EXIT
 grep -Ev '^[[:space:]]*($|#)' "${WHITELIST}" > "${FILES_FROM}"
 
 rsync -az -e "${SSH_COMMAND}" --files-from="${FILES_FROM}" "${HOME}/" "${SSH_USER}@${PUBLIC_IP}:~/"
+${SSH_COMMAND} "${SSH_USER}@${PUBLIC_IP}" 'sudo /usr/local/sbin/nebius-dev-refresh-shell.sh'

@@ -75,6 +75,7 @@ package_upgrade: false
 packages:
   - bash-completion
   - build-essential
+  - bzip2
   - ca-certificates
   - curl
   - git
@@ -86,6 +87,37 @@ packages:
   - tmux
   - unzip
 write_files:
+  - path: /usr/local/sbin/nebius-dev-refresh-shell.sh
+    permissions: '0755'
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      user="${SSH_USER}"
+      bashrc="/home/${SSH_USER}/.bashrc"
+      marker_begin="# >>> nebius-dev shell setup >>>"
+      marker_end="# <<< nebius-dev shell setup <<<"
+
+      touch "\${bashrc}"
+      tmp="\$(mktemp)"
+      sed "/^\${marker_begin}\$/,/^\${marker_end}\$/d" "\${bashrc}" > "\${tmp}"
+      cat "\${tmp}" > "\${bashrc}"
+      rm -f "\${tmp}"
+      cat >> "\${bashrc}" <<'BASHRC'
+      # >>> nebius-dev shell setup >>>
+      export PATH="\$HOME/.local/bin:\$PATH"
+      if [ -f "\$HOME/miniconda3/etc/profile.d/conda.sh" ]; then . "\$HOME/miniconda3/etc/profile.d/conda.sh"; fi
+      if [ -f "\$HOME/.env" ]; then set -a; source "\$HOME/.env"; set +a; fi
+      if [ -f "\$HOME/.env.nebius" ]; then set -a; source "\$HOME/.env.nebius"; set +a; fi
+      # <<< nebius-dev shell setup <<<
+      BASHRC
+      chown "\${user}:\${user}" "\${bashrc}"
+
+      cat > /etc/profile.d/nebius-dev.sh <<'PROFILE'
+      if [ -d "\$HOME/.local/bin" ]; then export PATH="\$HOME/.local/bin:\$PATH"; fi
+      if [ -f "\$HOME/.env" ]; then set -a; . "\$HOME/.env"; set +a; fi
+      if [ -f "\$HOME/.env.nebius" ]; then set -a; . "\$HOME/.env.nebius"; set +a; fi
+      PROFILE
   - path: /usr/local/sbin/nebius-dev-firstboot.sh
     permissions: '0755'
     content: |
@@ -119,23 +151,20 @@ write_files:
 
       sudo -u "\${user}" bash -lc 'curl -LsSf https://astral.sh/uv/install.sh | sh'
       sudo -u "\${user}" bash -lc 'curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash'
-      sudo -u "\${user}" bash -lc 'source ~/.nvm/nvm.sh && nvm install ${NODE_VERSION} && nvm alias default ${NODE_VERSION} && npm install -g ${CODEX_NPM_PACKAGE} ${CLAUDE_NPM_PACKAGE}'
-      sudo -u "\${user}" bash -lc 'curl -fsSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash'
+      sudo -u "\${user}" bash -lc 'source ~/.nvm/nvm.sh && nvm install ${NODE_VERSION} && nvm alias default ${NODE_VERSION} && npm install -g ${CODEX_NPM_PACKAGE} ${CLAUDE_NPM_PACKAGE} && mkdir -p ~/.local/bin && for tool in node npm npx codex claude; do ln -sf "\$(command -v "\$tool")" ~/.local/bin/"\$tool"; done'
+      sudo -u "\${user}" bash -lc 'curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh && bash /tmp/miniconda.sh -b -p "\$HOME/miniconda3" && "\$HOME/miniconda3/bin/conda" config --set auto_activate_base false && "\$HOME/miniconda3/bin/conda" config --add channels conda-forge && "\$HOME/miniconda3/bin/conda" config --set channel_priority strict && "\$HOME/miniconda3/bin/conda" install -y -n base -c conda-forge btop nvitop && "\$HOME/miniconda3/bin/conda" clean -afy && mkdir -p ~/.local/bin && for tool in conda btop nvitop; do ln -sf "\$HOME/miniconda3/bin/\$tool" ~/.local/bin/"\$tool"; done'
+      sudo -u "\${user}" bash -lc 'curl -fsSL https://storage.eu-north1.nebius.cloud/cli/install.sh | bash && mkdir -p ~/.local/bin && ln -sf ~/.nebius/bin/nebius ~/.local/bin/nebius'
 
-      cat > "/home/\${user}/.env" <<ENVEOF
+      cat > "/home/\${user}/.env.nebius" <<ENVEOF
       CACHE_DIR=/ceph/scratch/${SSH_USER}/cache
       FAST_CACHE_DIR=/ceph/scratch/${SSH_USER}/tmp
       HF_HOME=/ceph/scratch/${SSH_USER}/hf
       HF_XET_HIGH_PERFORMANCE=1
       ENVEOF
-      chown "\${user}:\${user}" "/home/\${user}/.env"
-      chmod 600 "/home/\${user}/.env"
+      chown "\${user}:\${user}" "/home/\${user}/.env.nebius"
+      chmod 600 "/home/\${user}/.env.nebius"
 
-      grep -q "HF_XET_HIGH_PERFORMANCE" "/home/\${user}/.bashrc" || cat >> "/home/\${user}/.bashrc" <<'BASHRC'
-
-      if [ -f "\$HOME/.env" ]; then set -a; source "\$HOME/.env"; set +a; fi
-      BASHRC
-      chown "\${user}:\${user}" "/home/\${user}/.bashrc"
+      /usr/local/sbin/nebius-dev-refresh-shell.sh
 runcmd:
   - [bash, /usr/local/sbin/nebius-dev-firstboot.sh]
 EOF

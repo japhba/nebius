@@ -5,8 +5,8 @@ Provisions a single cheap Nebius CPU dev VM for remote coding/orchestration work
 - `2vcpu-8gb` CPU VM by default (~$36/month).
 - 300 GiB persistent `network_ssd` block disk mounted as `/home`, so your home directory survives VM rebuilds (~$21/month).
 - Nebius shared filesystem mounted as `/ceph/scratch/$USER` for caches and large data (`SCRATCH_FS_SIZE_GIB * $0.08/month`; default 1024 GiB ≈ $82/month).
-- First boot installs uv, nvm/Node, Codex, Claude Code, and the Nebius CLI via cloud-init.
-- Optional one-shot sync of local Codex/Claude credentials and a whitelisted set of dotfiles after the VM is reachable.
+- First boot installs uv, nvm/Node, Codex, Claude Code, Miniconda, `tmux`, `btop`, `nvitop`, and the Nebius CLI via cloud-init.
+- Optional one-shot sync of local Codex/Claude credentials and a whitelisted set of home config files after the VM is reachable. Local `~/.env` is sourced alongside VM-specific cache defaults in `~/.env.nebius`.
 
 Compute stops billing when the VM is stopped. Disks and the shared filesystem bill while they exist.
 
