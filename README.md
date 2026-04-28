@@ -46,11 +46,25 @@ After launch:
 scripts/ssh-dev-box.sh
 scripts/sync-home-whitelist.sh
 scripts/sync-agent-auth.sh
+scripts/sync-env-file.sh jbauer@u435d.id.gatsby.ucl.ac.uk
 scripts/stop-dev-box.sh
 scripts/start-dev-box.sh
 ```
 
 By default, launch copies local Codex and Claude credentials to the VM. That is convenient, but it also places live auth material on the Nebius host. Set `SYNC_AUTH=0` to skip that step.
+
+For clusters that do not accept SSH `SendEnv`, sync a private env file into the remote home directory:
+
+```bash
+SRC_ENV=~/.config/secrets/remote.env scripts/sync-env-file.sh jbauer@u435d.id.gatsby.ucl.ac.uk
+```
+
+On the Gatsby cluster this lands in NFS `~/.env`, so other nodes see the same file. Start tools from a shell that sources it:
+
+```bash
+set -a; source ~/.env; set +a
+codex
+```
 
 To delete the VM plus the two persistent storage resources created by the launcher:
 
