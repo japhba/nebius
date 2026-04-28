@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG_FILE="${CONFIG_FILE:-${REPO_DIR}/config.env}"
+[ -f "${CONFIG_FILE}" ] && source "${CONFIG_FILE}"
+
 PROJECT_ID="${PROJECT_ID:-project-e00nrkpdpr00msfn2n009m}"
 NAME="${NAME:-nebius-dev}"
 REGION="${REGION:-eu-north1}"
@@ -22,9 +26,8 @@ IMAGE_PARENT_ID="${IMAGE_PARENT_ID:-project-e00public-images}"
 NODE_VERSION="${NODE_VERSION:-22}"
 CODEX_NPM_PACKAGE="${CODEX_NPM_PACKAGE:-@openai/codex}"
 CLAUDE_NPM_PACKAGE="${CLAUDE_NPM_PACKAGE:-@anthropic-ai/claude-code}"
-SYNC_AUTH="${SYNC_AUTH:-0}"
+SYNC_AUTH="${SYNC_AUTH:-1}"
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="${REPO_DIR}/.state"
 STATE_FILE="${STATE_DIR}/${NAME}.env"
 mkdir -p "${STATE_DIR}"

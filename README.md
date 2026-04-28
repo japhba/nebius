@@ -25,6 +25,8 @@ Compute stops billing when the VM is stopped. Disks and shared filesystems bill 
 
 ## Launch
 
+Edit [config.env](config.env) first. It contains the project, VM size, disk sizes, and auth-sync default.
+
 ```bash
 cd ~/nebius
 scripts/launch-dev-box.sh
@@ -35,7 +37,7 @@ Useful overrides:
 ```bash
 PRESET=4vcpu-16gb scripts/launch-dev-box.sh
 SCRATCH_FS_SIZE_GIB=4096 scripts/launch-dev-box.sh
-SYNC_AUTH=1 scripts/launch-dev-box.sh
+SYNC_AUTH=0 scripts/launch-dev-box.sh
 ```
 
 After launch:
@@ -48,7 +50,7 @@ scripts/stop-dev-box.sh
 scripts/start-dev-box.sh
 ```
 
-`SYNC_AUTH=1` copies local Codex and Claude credentials to the VM. That is convenient, but it also places live auth material on the Nebius host.
+By default, launch copies local Codex and Claude credentials to the VM. That is convenient, but it also places live auth material on the Nebius host. Set `SYNC_AUTH=0` to skip that step.
 
 To delete the VM plus the two persistent storage resources created by the launcher:
 
