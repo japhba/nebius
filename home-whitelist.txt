@@ -8,7 +8,6 @@
 
 .bash_profile
 .bashrc
-.config/gh/
 .config/git/
 .env
 .gitconfig
