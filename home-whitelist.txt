@@ -13,5 +13,4 @@
 .env
 .gitconfig
 .profile
-.ssh/config
 .tmux.conf
