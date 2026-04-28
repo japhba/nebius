@@ -1,0 +1,10 @@
+# Paths are relative to this machine's $HOME and are rsynced to the Nebius
+# dev box home directory after the VM is reachable.
+#
+# Keep secrets and high-churn caches out of this file unless you explicitly want
+# them on the VM. Be careful with shell rc files: the VM writes its own tool
+# setup into ~/.bashrc during first boot.
+# Agent credentials are handled separately by scripts/sync-agent-auth.sh.
+
+.gitconfig
+loracles/

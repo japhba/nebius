@@ -1,0 +1,5 @@
+.state/
+.secrets/
+*.log
+*.tmp
+cloud-init.rendered.yaml
