@@ -8,7 +8,7 @@ source "${STATE_FILE}"
 REMOTE="${SSH_USER}@${PUBLIC_IP}"
 KNOWN_HOSTS_FILE="${REPO_DIR}/.state/known_hosts.${NAME}"
 IDENTITY_FILE="${IDENTITY_FILE:-${HOME}/.ssh/nebius}"
-SSH_COMMAND="ssh -i ${IDENTITY_FILE} -o IdentitiesOnly=yes -o HostKeyAlias=${NAME} -o UserKnownHostsFile=${KNOWN_HOSTS_FILE} -o StrictHostKeyChecking=yes"
+SSH_COMMAND="ssh -F /dev/null -i ${IDENTITY_FILE} -o IdentitiesOnly=yes -o IdentityAgent=none -o ProxyCommand=none -o HostKeyAlias=${NAME} -o UserKnownHostsFile=${KNOWN_HOSTS_FILE} -o StrictHostKeyChecking=yes"
 
 "${REPO_DIR}/scripts/wait-dev-box-ready.sh" >/dev/null
 ${SSH_COMMAND} "${REMOTE}" 'mkdir -p ~/.codex ~/.claude'

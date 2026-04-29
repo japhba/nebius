@@ -274,8 +274,11 @@ echo "Waiting for SSH at ${SSH_USER}@${PUBLIC_IP}..."
 SSH_READY=0
 for _ in $(seq 1 120); do
   if ssh -o BatchMode=yes -o ConnectTimeout=5 \
+       -F /dev/null \
        -i "${SSH_PUBLIC_KEY_FILE%.pub}" \
        -o IdentitiesOnly=yes \
+       -o IdentityAgent=none \
+       -o ProxyCommand=none \
        -o "HostKeyAlias=${NAME}" \
        -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}" \
        -o StrictHostKeyChecking=yes \

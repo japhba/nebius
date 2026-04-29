@@ -22,8 +22,11 @@ fi
 KNOWN_HOSTS_FILE="${REPO_DIR}/.state/known_hosts.${NAME}"
 IDENTITY_FILE="${IDENTITY_FILE:-${HOME}/.ssh/nebius}"
 exec ssh \
+  -F /dev/null \
   -i "${IDENTITY_FILE}" \
   -o IdentitiesOnly=yes \
+  -o IdentityAgent=none \
+  -o ProxyCommand=none \
   -o "HostKeyAlias=${NAME}" \
   -o "UserKnownHostsFile=${KNOWN_HOSTS_FILE}" \
   -o StrictHostKeyChecking=yes \
